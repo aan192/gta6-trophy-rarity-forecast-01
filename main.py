@@ -46,15 +46,19 @@ def forecast_trophy(history_rates, history_times, horizon_days, default_logit):
     
     if not valid_pairs:
         m = default_logit
-        s = max(0.8, 1.2 * math.sqrt(max(0.01, horizon_days)))
+        # Generous spread for unobserved trophies with thin data
+        s = max(1.2, 1.8 * math.sqrt(max(0.01, horizon_days)))
     else:
         times, rates = zip(*valid_pairs)
         logits = [logit(r) for r in rates]
         
         n = len(logits)
+        # Thin data penalty / uncertainty boost for few reads
+        thin_factor = 1.0 + (2.0 / math.sqrt(n)) if n < 5 else 1.0
+        
         if n == 1:
             m = logits[0]
-            s = max(0.8, 1.0 * math.sqrt(max(0.01, horizon_days)))
+            s = max(1.0, 1.4 * thin_factor * math.sqrt(max(0.01, horizon_days)))
         else:
             recent_logits = logits[-3:] if n >= 3 else logits[-2:]
             recent_mean = sum(recent_logits) / len(recent_logits)
@@ -64,12 +68,13 @@ def forecast_trophy(history_rates, history_times, horizon_days, default_logit):
             variance = sum((l - mean_lg) ** 2 for l in logits) / n
             std_lg = math.sqrt(variance)
             
-            # Robust blend of recent and long term
-            m = 0.75 * recent_mean + 0.25 * long_mean
+            # Robust blend of recent and long term, leaning on recent if sparse
+            weight_recent = 0.8 if n < 5 else 0.75
+            m = weight_recent * recent_mean + (1 - weight_recent) * long_mean
             
-            vol_factor = max(0.4, std_lg)
-            # Generous spread to handle page refreshes and rate jumps robustly
-            s = max(0.8, (0.6 + 0.4 * vol_factor) * math.sqrt(max(0.01, horizon_days)))
+            vol_factor = max(0.5, std_lg)
+            # Generous volatility and horizon-aware spread with thin data robustness
+            s = max(0.9, (0.7 + 0.5 * vol_factor) * thin_factor * math.sqrt(max(0.01, horizon_days)))
 
     q_vals = []
     for z in Z:
